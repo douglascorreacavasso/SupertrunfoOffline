@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Baixador de fotos — Super Trunfo</title>
+  <style>
+    :root{--roxo:#5b21b6;--roxo2:#7c3aed;--fundo:#f5f2ff;--tinta:#21143e;--linha:#ded4f5;--verde:#087f5b;--vermelho:#b42318}
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(145deg,#f8f4ff,#eee8ff);font:16px system-ui,-apple-system,Segoe UI,sans-serif;color:var(--tinta)}
+    main{max-width:760px;margin:0 auto;padding:28px 16px 54px}.marca{text-align:center;color:var(--roxo);font-weight:900;letter-spacing:1px;font-size:13px}.marca b{display:block;font-size:34px;line-height:.9;letter-spacing:-1px}
+    .card{background:#fff;border:1px solid var(--linha);box-shadow:0 10px 30px #43208012;border-radius:22px;padding:22px;margin-top:18px}h1{font-size:25px;margin:0 0 8px}p{line-height:1.45;color:#55486e}.campo{display:grid;gap:7px;margin:18px 0}label{font-weight:750}select,button{font:inherit;border-radius:12px;padding:12px 14px;border:1px solid var(--linha)}select{background:#fff;color:var(--tinta)}button{background:var(--roxo);border:0;color:white;font-weight:800;cursor:pointer;width:100%}button:hover{background:var(--roxo2)}button:disabled{opacity:.55;cursor:wait}.info{display:flex;gap:12px;align-items:center;background:#f5f0ff;border-radius:14px;padding:12px;margin:14px 0}.emoji{font-size:32px}.muted{font-size:13px;color:#685e7b}.alerta{padding:12px 14px;border-radius:12px;background:#fff8db;border:1px solid #f7de85;font-size:13px;color:#625000}.progresso{height:12px;background:#e9e1f8;border-radius:999px;overflow:hidden;margin-top:15px}.progresso i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--roxo),#a78bfa);transition:width .15s}.status{min-height:22px;font-size:14px;margin:10px 0 0}.ok{color:var(--verde)}.erro{color:var(--vermelho)}a{color:var(--roxo);font-weight:700}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="marca">SUPER <b>TRUNFO</b>FOTOS DOS BARALHOS</div>
+    <section class="card">
+      <h1>Baixar somente as fotos</h1>
+      <p>Esta página não abre partida, não salva baralho no jogo e não mistura as duas coisas. Escolha um baralho e ela gera um arquivo ZIP com as fotos disponíveis e um CSV com as fontes.</p>
+      <div class="campo"><label for="deck">Baralho</label><select id="deck" disabled><option>Carregando baralhos…</option></select></div>
+      <div class="info"><span class="emoji" id="emoji">🃏</span><span><strong id="nome">Selecione um baralho</strong><br><span class="muted" id="detalhe">Aguarde o catálogo carregar.</span></span></div>
+      <button id="baixar" disabled>Baixar fotos deste baralho (.zip)</button>
+      <div class="progresso" hidden><i id="barra"></i></div><div class="status" id="status" aria-live="polite"></div>
+    </section>
+    <section class="card"><strong>Importante</strong><p class="muted">É preciso estar com internet para fotos que vêm da Wikimedia Commons ou da Riot. As fotos já existentes na pasta <code>decks/</code> também entram no ZIP. Cartas sem foto definida são apenas registradas no relatório — esta página não pesquisa nem inventa imagens.</p><p class="muted"><a href="index.html">← Voltar para o jogo</a></p></section>
+  </main>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const catalogo = [];
+let deckAtual = null;
+function carregarScript(src) { return new Promise((ok, falha) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => falha(new Error('Não foi possível abrir ' + src)); document.head.appendChild(s); }); }
+window.STDeck = deck => { deckAtual = deck; };
+function seguro(s) { return String(s || 'sem-nome').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 90) || 'sem-nome'; }
+function atualizarInfo() { const m = catalogo.find(x => x.id === $('#deck').value); if (!m) return; $('#emoji').textContent = m.emoji || '🃏'; $('#nome').textContent = m.nome; $('#detalhe').textContent = `${m.qtd} cartas • o ZIP contém somente as imagens que já têm fonte definida.`; }
+async function carregarDeck(id) { deckAtual = null; await carregarScript('decks/' + encodeURIComponent(id) + '.js'); if (!deckAtual) throw new Error('O arquivo do baralho não respondeu.'); return deckAtual; }
+async function fonte(c) {
+  if (!c.img) return null;
+  if (c.img.startsWith('decks/') || c.img.startsWith('http') || c.img.startsWith('data:')) return { url: c.img, credito: c.cred || '', licenca: c.lic || '', origem: c.img.startsWith('data:') ? 'imagem incorporada no baralho' : c.img };
+  if (c.img.startsWith('lol:')) { const url = 'https://ddragon.leagueoflegends.com/cdn/img/champion/loading/' + c.img.slice(4) + '_0.jpg'; return { url, credito: c.cred || 'Riot Games', licenca: '', origem: url }; }
+  if (c.img.startsWith('wiki:')) {
+    const titulo = c.img.slice(5).replace(/ /g, '_');
+    const r = await fetch('https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(titulo), { headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('Wikimedia retornou ' + r.status);
+    const j = await r.json(); const imagem = j.thumbnail || j.originalimage;
+    if (!imagem || !imagem.source) return null;
+    return { url: imagem.source, credito: c.cred || 'Wikimedia Commons', licenca: c.lic || '', origem: j.content_urls?.desktop?.page || imagem.source };
+  }
+  return null;
+}
+async function bytes(url) { const r = await fetch(url, { mode: 'cors' }); if (!r.ok) throw new Error('HTTP ' + r.status); return new Uint8Array(await (await r.blob()).arrayBuffer()); }
+function extensao(url, tipo) { const m = String(url).split('?')[0].match(/\.([a-z0-9]{2,5})$/i); if (m) return m[1].toLowerCase().replace('jpeg', 'jpg'); return (tipo || 'jpg').replace('image/', '').replace('jpeg', 'jpg').replace('svg+xml', 'svg'); }
+const tabelaCrc = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(a) { let c = 0xFFFFFFFF; for (let i = 0; i < a.length; i++) c = tabelaCrc[(c ^ a[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zip(arquivos) { const enc = new TextEncoder(), partes = [], central = []; let pos = 0; for (const arq of arquivos) { const nome = enc.encode(arq.nome), tamanho = arq.dados.length, crc = crc32(arq.dados); const h = new DataView(new ArrayBuffer(30)); h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint32(14, crc, true); h.setUint32(18, tamanho, true); h.setUint32(22, tamanho, true); h.setUint16(26, nome.length, true); partes.push(new Uint8Array(h.buffer), nome, arq.dados); const c = new DataView(new ArrayBuffer(46)); c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint32(16, crc, true); c.setUint32(20, tamanho, true); c.setUint32(24, tamanho, true); c.setUint16(28, nome.length, true); c.setUint32(42, pos, true); central.push(new Uint8Array(c.buffer), nome); pos += 30 + nome.length + tamanho; } const tamanhoCentral = central.reduce((s, p) => s + p.length, 0), fim = new DataView(new ArrayBuffer(22)); fim.setUint32(0, 0x06054b50, true); fim.setUint16(8, arquivos.length, true); fim.setUint16(10, arquivos.length, true); fim.setUint32(12, tamanhoCentral, true); fim.setUint32(16, pos, true); return new Blob([...partes, ...central, new Uint8Array(fim.buffer)], { type: 'application/zip' }); }
+function csv(v) { return '"' + String(v ?? '').replace(/"/g, '""') + '"'; }
+function baixarArquivo(nome, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000); }
+async function baixarFotos() {
+  const botao = $('#baixar'), barra = $('#barra'), status = $('#status'); botao.disabled = true; $('.progresso').hidden = false; barra.style.width = '0%'; status.className = 'status';
+  try {
+    const d = await carregarDeck($('#deck').value), arquivos = [], linhas = [['numero','carta','arquivo','credito','licenca','origem','situacao']]; let ok = 0, falhou = 0;
+    for (let i = 0; i < d.cards.length; i++) { const c = d.cards[i]; status.textContent = `Baixando ${i + 1} de ${d.cards.length}: ${c.nome}`; try { const f = await fonte(c); if (!f) { falhou++; linhas.push([c.n,c.nome,'','','','','sem fonte de imagem']); } else { const dados = await bytes(f.url); const arquivo = String(c.n).padStart(3, '0') + '_' + seguro(c.nome) + '.' + extensao(f.url); arquivos.push({ nome: d.id + '/' + arquivo, dados }); linhas.push([c.n,c.nome,arquivo,f.credito,f.licenca,f.origem,'baixada']); ok++; } } catch (e) { falhou++; linhas.push([c.n,c.nome,'','','','',String(e.message || e)]); } barra.style.width = Math.round((i + 1) / d.cards.length * 100) + '%'; }
+    const textoCsv = '\uFEFF' + linhas.map(l => l.map(csv).join(';')).join('\r\n'); arquivos.push({ nome: d.id + '/FONTES_E_RELATORIO.csv', dados: new TextEncoder().encode(textoCsv) }); if (!ok) throw new Error('Nenhuma foto pôde ser baixada. Confira a conexão e abra pelo servidor do projeto.'); baixarArquivo('fotos_' + d.id + '.zip', zip(arquivos)); status.className = 'status ok'; status.textContent = `Pronto: ${ok} foto(s) no ZIP${falhou ? `; ${falhou} registrada(s) no relatório.` : '.'}`;
+  } catch (e) { status.className = 'status erro'; status.textContent = 'Não foi possível gerar o ZIP: ' + (e.message || e); } finally { botao.disabled = false; }
+}
+(async () => { try { await carregarScript('decks/catalogo.js'); catalogo.push(...(window.ST_CATALOGO || [])); const select = $('#deck'); select.innerHTML = catalogo.map(m => `<option value="${m.id}">${m.emoji || '🃏'} ${m.nome} (${m.qtd})</option>`).join(''); select.disabled = false; $('#baixar').disabled = false; atualizarInfo(); select.onchange = atualizarInfo; $('#baixar').onclick = baixarFotos; } catch (e) { $('#status').className = 'status erro'; $('#status').textContent = 'Não consegui abrir o catálogo. Use o INICIAR_NO_PC.bat ou publique a pasta inteira.'; } })();
+</script>
+</body>
+</html>
